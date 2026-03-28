@@ -1,84 +1,94 @@
 import re
-import numpy as np
 from urllib.parse import urlparse
-import math
+from math import log2
+from functools import lru_cache
 
-class SimpleFeatureExtractor:
-    def __init__(self):
-        self.suspicious_keywords = [
-            'login', 'signin', 'verify', 'secure', 'account', 'banking',
-            'update', 'confirm', 'password', 'wallet', 'paypal', 'ebay',
-            'amazon', 'apple', 'microsoft', 'support', 'service', 'alert'
-        ]
-        
-        self.suspicious_tlds = ['tk', 'ml', 'ga', 'cf', 'gq', 'xyz', 'top']
+# Pre-compile regex patterns
+IP_PATTERN = re.compile(r'^\d+\.\d+\.\d+\.\d+$')  # FIXED
+CONSONANTS = set('bcdfghjklmnpqrstvwxyz')  # FIXED (added 'w')
+
+@lru_cache(maxsize=1000)
+def parse_url_cached(url):  # FIXED function name
+    """Cache URL parsing results"""
+    return urlparse(url)
+
+class FastFeatureExtractor:
+    def __init__(self):  # FIXED indentation
+        self.suspicious_tlds = {'tk', 'ml', 'ga', 'cf', 'click', 'loan', 'work', 'top', 'xyz', 'club'}
+        self.short_services = {'bit.ly', 'tinyurl', 'goo.gl', 'ow.ly', 'is.gd', 'buff.ly'}
+        self.suspicious_ext = {'exe', 'scr', 'zip', 'rar', 'doc', 'docx', 'xls', 'xlsx'}
+        self.keywords = {'secure', 'login', 'signin', 'verify', 'account', 'update', 
+                        'confirm', 'banking', 'paypal', 'apple', 'microsoft', 'amazon'}
     
     def extract(self, url):
-        """Simple feature extraction without tldextract"""
-        features = {}
+        """Fast feature extraction"""
+        url_str = url.lower()
         
-        # Basic URL features
-        features['url_length'] = len(url)
-        features['is_https'] = 1 if url.startswith('https') else 0
+        # Parse URL (cached)
+        parsed = parse_url_cached(url_str)
+        domain = parsed.netloc.split(':')[0]
+        subdomains = domain.split('.')
+        tld = subdomains[-1] if subdomains else ''
+        path = parsed.path.lower()
         
-        # Domain analysis
-        try:
-            parsed = urlparse(url)
-            domain = parsed.netloc.split(':')[0] if parsed.netloc else ''
-            
-            features['domain_length'] = len(domain)
-            
-            # IP address check
-            ip_pattern = r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$'
-            features['is_ip_address'] = 1 if re.match(ip_pattern, domain) else 0
-            
-            # Subdomain count
-            subdomain_count = domain.count('.') - 1
-            features['num_subdomains'] = max(0, subdomain_count)
-            
-            # TLD check (simplified)
-            parts = domain.split('.')
-            if len(parts) >= 2:
-                tld = parts[-1].lower()
-                features['has_suspicious_tld'] = 1 if tld in self.suspicious_tlds else 0
-            else:
-                features['has_suspicious_tld'] = 0
-            
-            # Port check
-            features['has_port'] = 1 if ':' in parsed.netloc else 0
-            
-        except:
-            features['domain_length'] = 0
-            features['is_ip_address'] = 0
-            features['num_subdomains'] = 0
-            features['has_suspicious_tld'] = 0
-            features['has_port'] = 0
+        # Fast character counts
+        digit_count = sum(1 for c in url_str if c.isdigit())
+        letter_count = sum(1 for c in url_str if c.isalpha())
+        special_chars = sum(1 for c in url_str if not c.isalnum())
         
-        # Character features
-        url_lower = url.lower()
-        features['has_at_symbol'] = 1 if '@' in url else 0
-        features['has_obfuscation'] = 1 if '%' in url else 0
-        
-        # Suspicious keywords
+        # Fast keyword count
         keyword_count = 0
-        for keyword in self.suspicious_keywords:
-            if keyword in url_lower:
+        for k in self.keywords:
+            if k in url_str:
                 keyword_count += 1
-        features['suspicious_keyword_count'] = keyword_count
         
-        # Character counts
-        features['num_digits'] = sum(c.isdigit() for c in url)
-        features['num_special_chars'] = sum(not c.isalnum() for c in url)
+        # Fast consecutive consonants
+        max_cons = 0
+        current = 0
+        for c in url_str:
+            if c in CONSONANTS:
+                current += 1
+                if current > max_cons:
+                    max_cons = current
+            else:
+                current = 0
         
-        # Query parameters
-        features['num_equals'] = url.count('=')
-        features['num_question_marks'] = url.count('?')
+        # Fast entropy calculation
+        def calc_entropy(s):
+            if not s:
+                return 0
+            prob = [s.count(c)/len(s) for c in set(s)]
+            return -sum(p * log2(p) for p in prob if p > 0)
         
-        # Simple entropy calculation
-        if url:
-            prob = [float(url.count(c)) / len(url) for c in set(url)]
-            features['entropy'] = -sum(p * math.log2(p) for p in prob if p > 0)
-        else:
-            features['entropy'] = 0
-        
-        return features
+        return {
+            'URLLength': len(url_str),
+            'IsHTTPS': 1 if url_str.startswith('https') else 0,
+            'DomainLength': len(domain),
+            'IsDomainIP': 1 if IP_PATTERN.match(domain) else 0,
+            'NoOfSubDomain': max(0, len(subdomains) - 2),
+            'HasDeepSubdomain': 1 if len(subdomains) > 3 else 0,
+            'TLDLength': len(tld),
+            'HasSuspiciousTLD': 1 if tld in self.suspicious_tlds else 0,
+            'IsShortenedURL': 1 if any(s in domain for s in self.short_services) else 0,
+            'HasObfuscation': 1 if '@' in url_str or '//' in url_str[8:] else 0,
+            'NoOfObfuscatedChar': url_str.count('@') + url_str.count('%') + url_str.count('//'),
+            'HasAtSymbol': 1 if '@' in url_str else 0,
+            'HasDoubleSlash': 1 if '//' in url_str[8:] else 0,
+            'NoOfLettersInURL': letter_count,
+            'NoOfDigitsInURL': digit_count,
+            'LetterToDigitRatio': digit_count / max(1, letter_count),
+            'SpecialCharRatio': special_chars / max(1, len(url_str)),
+            'NoOfEqualsInURL': url_str.count('='),
+            'NoOfQMarkInURL': url_str.count('?'),
+            'NoOfAmpersandInURL': url_str.count('&'),
+            'HasPort': 1 if ':' in domain else 0,
+            'HasSuspiciousFileExt': 1 if any(path.endswith(ext) for ext in self.suspicious_ext) else 0,
+            'SuspiciousKeywordCount': keyword_count,
+            'DigitConcentration': digit_count / max(1, len(url_str)),
+            'Entropy': calc_entropy(url_str),
+            'MaxConsecutiveConsonants': max_cons,
+            'PathLength': len(path),
+            'QueryLength': len(parsed.query),
+            'HasFragment': 1 if parsed.fragment else 0,
+            'URLDepth': path.count('/')
+        }

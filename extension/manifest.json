@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "PhiUSIIL Phishing Detector",
+  "name": "Phishing Detector",
   "version": "1.0.0",
-  "description": "Detect phishing URLs using machine learning",
+  "description": "Detect phishing websites using machine learning",
   "permissions": [
     "tabs",
     "storage",
@@ -10,14 +10,16 @@
     "activeTab"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "http://localhost:5000/*",
+    "https://*/*",
+    "http://*/*"
   ],
   "background": {
     "service_worker": "background.js"
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "PhiUSIIL Phishing Detector",
+    "default_title": "Phishing Detector",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
